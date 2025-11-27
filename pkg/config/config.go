@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net"
 	"os"
 
 	"sigs.k8s.io/cloud-provider-kind/pkg/constants"
@@ -24,8 +25,6 @@ func newDefaultConfig() *Config {
 	return c
 }
 
-
-
 type Config struct {
 	EnableLogDump bool
 	LogDir        string
@@ -41,6 +40,8 @@ type Config struct {
 	GatewayReleaseChannel GatewayReleaseChannel
 	IngressDefault        bool
 	ProxyImage            string
+
+	LoadBalancerIPRange net.IPNet
 }
 
 type Connectivity int

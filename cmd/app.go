@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
@@ -15,10 +16,11 @@ import (
 	"k8s.io/component-base/logs"
 	"k8s.io/klog/v2"
 
-	"sigs.k8s.io/cloud-provider-kind/pkg/config"
-	"sigs.k8s.io/cloud-provider-kind/pkg/controller"
 	"sigs.k8s.io/kind/pkg/cluster"
 	kindcmd "sigs.k8s.io/kind/pkg/cmd"
+
+	"sigs.k8s.io/cloud-provider-kind/pkg/config"
+	"sigs.k8s.io/cloud-provider-kind/pkg/controller"
 )
 
 var (
@@ -28,6 +30,7 @@ var (
 	enableLBPortMapping  bool
 	gatewayChannel       string
 	enableDefaultIngress bool
+	loadBalancerIPRange  net.IPNet
 )
 
 func Main() {
@@ -54,7 +57,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&enableLBPortMapping, "enable-lb-port-mapping", false, "enable port-mapping on the load balancer ports")
 	cmd.Flags().StringVar(&gatewayChannel, "gateway-channel", "standard", "define the gateway API release channel to be used (standard, experimental, disabled), by default is standard")
 	cmd.Flags().BoolVar(&enableDefaultIngress, "enable-default-ingress", true, "enable default ingress for the cloud provider kind ingress")
-
+	cmd.Flags().IPNetVar(&loadBalancerIPRange, "load-balancer-ip-range", net.IPNet{}, "CIDR to allocate load balancer IPs from")
 
 	cmd.AddCommand(newListImagesCommand())
 
@@ -120,6 +123,7 @@ func runE(cmd *cobra.Command, args []string) error {
 	}
 
 	config.DefaultConfig.IngressDefault = enableDefaultIngress
+	config.DefaultConfig.LoadBalancerIPRange = loadBalancerIPRange
 
 	// Validate gateway channel
 	channel := config.GatewayReleaseChannel(gatewayChannel)

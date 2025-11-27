@@ -6,15 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"path"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cloud-provider-kind/pkg/config"
 	"sigs.k8s.io/cloud-provider-kind/pkg/constants"
 	"sigs.k8s.io/cloud-provider-kind/pkg/container"
@@ -193,6 +197,22 @@ func (s *Server) createLoadBalancer(clusterName string, service *v1.Service, ima
 		networkName = n
 	}
 
+	if service.Spec.LoadBalancerIP == "" && len(config.DefaultConfig.LoadBalancerIPRange.IP) > 0 {
+		ipv4, _, err := container.AllocatedIPs(networkName)
+		if err != nil {
+			return err
+		}
+		prefix, err := netip.ParsePrefix(config.DefaultConfig.LoadBalancerIPRange.String())
+		if err != nil {
+			return err
+		}
+		// Find the first unused IP in the LoadBalancerIPRange not present in the ipv4 slice
+		service.Spec.LoadBalancerIP, err = FindFirstUnusedIP(prefix, ipv4)
+		if err != nil {
+			return err
+		}
+	}
+
 	args := []string{
 		"--detach", // run the container detached
 		"--tty",    // allocate a tty for entrypoint logs
@@ -231,7 +251,12 @@ func (s *Server) createLoadBalancer(clusterName string, service *v1.Service, ima
 			if port.Protocol != v1.ProtocolTCP && port.Protocol != v1.ProtocolUDP {
 				continue
 			}
-			args = append(args, fmt.Sprintf("--publish=%d/%s", port.Port, port.Protocol))
+
+			var hostPortBinding string
+			if service.Spec.LoadBalancerIP != "" {
+				hostPortBinding = net.JoinHostPort(service.Spec.LoadBalancerIP, fmt.Sprintf("%d", port.Port)) + ":"
+			}
+			args = append(args, fmt.Sprintf("--publish=%s%d/%s", hostPortBinding, port.Port, port.Protocol))
 		}
 	}
 	// publish the admin endpoint
@@ -273,4 +298,24 @@ func isIPv6Service(service *v1.Service) bool {
 		}
 	}
 	return false
+}
+
+// FindFirstUnusedIP returns the first IP in the LoadBalancerIPRange not present in the ipv4 slice using netip
+func FindFirstUnusedIP(ipRange netip.Prefix, ipv4 []string) (string, error) {
+	used := sets.New[netip.Addr]()
+	for _, ipStr := range ipv4 {
+		ip, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse IP %s: %w", ipStr, err)
+		}
+		used.Insert(ip)
+	}
+
+	for ip := ipRange.Masked().Addr(); ipRange.Contains(ip); ip = ip.Next() {
+		if _, exists := used[ip]; !exists {
+			return ip.String(), nil
+		}
+	}
+
+	return "", fmt.Errorf("no available IP in range")
 }

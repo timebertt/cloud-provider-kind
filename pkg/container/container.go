@@ -178,6 +178,44 @@ func IPs(name string) (ipv4 string, ipv6 string, err error) {
 	return ips[0], ips[1], nil
 }
 
+func AllocatedIPs(networkName string) (ipv4 []string, ipv6 []string, err error) {
+	// retrieve the allocated IP address of the network using docker inspect
+	cmd := kindexec.Command(containerRuntime, "inspect",
+		"-f", "{{ json .Containers }}",
+		networkName,
+	)
+
+	lines, err := kindexec.OutputLines(cmd)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get network container IPs: %w", err)
+	}
+	if len(lines) != 1 {
+		return nil, nil, fmt.Errorf("file should only be one line, got %d lines: %w", len(lines), err)
+	}
+
+	type container struct {
+		IPv4Address string `json:"IPv4Address"`
+		IPv6Address string `json:"IPv6Address"`
+	}
+
+	containers := make(map[string]container)
+	err = json.Unmarshal([]byte(lines[0]), &containers)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, c := range containers {
+		if c.IPv4Address != "" {
+			ipv4 = append(ipv4, strings.Split(c.IPv4Address, "/")[0])
+		}
+		if c.IPv6Address != "" {
+			ipv6 = append(ipv6, strings.Split(c.IPv6Address, "/")[0])
+		}
+	}
+
+	return
+}
+
 // return a list with the map of the internal port to the external port
 func PortMaps(name string) (map[string]string, error) {
 	// retrieve the IP address of the node using docker inspect
